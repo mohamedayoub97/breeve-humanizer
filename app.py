@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import html
 import json
+import os
+from types import SimpleNamespace
 
 import pandas as pd
 import streamlit as st
@@ -62,6 +64,82 @@ if not API_KEY:
         "L'administrateur doit ajouter OPENROUTER_API_KEY dans les secrets de l'app."
     )
     st.stop()
+
+# ---------------------------------------------------------------------------
+# Persistence for the "Message unique" conversation history
+#
+# st.session_state only lives for as long as the Streamlit process stays up.
+# If the app restarts (redeploy, host waking the app up from sleep, a crash),
+# session_state is wiped and every past exchange disappears. To actually keep
+# the conversation around, we mirror it to a small JSON file on disk and
+# reload it the next time the app starts.
+#
+# Note: this file lives on the app's local disk. On hosts with an ephemeral
+# filesystem (e.g. a fresh redeploy from git on Streamlit Community Cloud),
+# the file itself can be wiped even though this code will happily recreate
+# it. Waking up from inactivity sleep on the same deployment does not wipe
+# it. If you need history to survive redeploys too, or need it kept
+# separately per user, it should go to a real database instead of a local
+# file — happy to wire that up if that's what you need.
+# ---------------------------------------------------------------------------
+
+HISTORY_FILE = "conversation_history.json"
+
+
+def _serialize_result(result: "PipelineResult") -> dict:
+    return {
+        "message": result.message,
+        "metadata": result.metadata,
+        "humanized_message": result.humanized_message,
+        "applied_rules": list(result.applied_rules or []),
+        "latency_ms": result.latency_ms,
+        "total_tokens": result.total_tokens,
+        "completion_tokens": result.completion_tokens,
+        "error": result.error,
+    }
+
+
+def _deserialize_result(data: dict) -> SimpleNamespace:
+    # A lightweight stand-in for PipelineResult, carrying just the attributes
+    # render_exchange() actually reads. Avoids depending on PipelineResult's
+    # exact constructor signature when rebuilding history from disk.
+    return SimpleNamespace(
+        message=data.get("message", ""),
+        metadata=data.get("metadata", ""),
+        humanized_message=data.get("humanized_message", ""),
+        applied_rules=data.get("applied_rules", []),
+        latency_ms=data.get("latency_ms", 0.0),
+        total_tokens=data.get("total_tokens"),
+        completion_tokens=data.get("completion_tokens"),
+        error=data.get("error"),
+    )
+
+
+def _load_conversation() -> list:
+    if not os.path.exists(HISTORY_FILE):
+        return []
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            raw_items = json.load(f)
+        return [(item["raw_input"], _deserialize_result(item["result"])) for item in raw_items]
+    except Exception:
+        # Corrupted or unreadable history file: start fresh instead of
+        # crashing the whole app on load.
+        return []
+
+
+def _save_conversation(conversation: list) -> None:
+    try:
+        payload = [
+            {"raw_input": raw, "result": _serialize_result(result)}
+            for raw, result in conversation
+        ]
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        # Persistence is a nice-to-have; never let a save failure break the UI.
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Sidebar — configuration
@@ -129,14 +207,107 @@ tab_single, tab_batch = st.tabs(["Message unique", "Traitement par lot (CSV)"])
 
 # -- Single message tab -----------------------------------------------------
 
-with tab_single:
-    st.caption(
-        "Collez un « Input brut » (une entrée de la colonne du Google Sheets) et validez. "
-        "Le pipeline appelle le modèle choisi pour le Cleaning, puis applique l'Humanizer en local (sans appel LLM)."
+RESULT_CARD_CSS = """
+<style>
+.result-card { background:#e5e7eb; border-radius:12px; padding:16px 18px; margin-top:8px; margin-bottom:14px; }
+.result-card .field-title { color:#2563eb; font-weight:700; font-size:13px;
+                             margin-top:14px; margin-bottom:2px; }
+.result-card .field-value { color:#111827; font-size:14px; white-space:pre-wrap; }
+.result-card .meta-line { color:#4b5563; font-size:12px; margin-top:8px; }
+.user-bubble { background:#2563eb; color:white; border-radius:12px; padding:10px 14px;
+               margin-top:10px; display:inline-block; max-width:90%; white-space:pre-wrap; }
+</style>
+"""
+
+
+def render_exchange(raw_input: str, result: PipelineResult, price):
+    st.markdown(f'<div class="user-bubble">{html.escape(raw_input)}</div>', unsafe_allow_html=True)
+
+    if result.error:
+        st.error(result.error)
+        return
+
+    rules_txt = ", ".join(result.applied_rules) if result.applied_rules else "aucune"
+    cost = estimate_cost_usd(result.total_tokens or 0, result.completion_tokens or 0, price)
+    cost_txt = f"  •  coût ≈ ${cost:.6f}" if cost is not None else ""
+
+    st.markdown(
+        f"""
+        <div class="result-card">
+            <div class="field-title">message (Cleaning)</div>
+            <div class="field-value">{html.escape(result.message) or "(vide)"}</div>
+            <div class="field-title">metadata</div>
+            <div class="field-value">{html.escape(result.metadata) or "(vide)"}</div>
+            <div class="field-title">humanized_message</div>
+            <div class="field-value">{html.escape(result.humanized_message) or "(vide)"}</div>
+            <div class="meta-line">règles appliquées : {html.escape(rules_txt)}  •  latence : {result.latency_ms:.0f} ms{cost_txt}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    raw_input = st.text_area("Input brut", height=100, placeholder="Collez le message brut ici…")
-    send = st.button("Envoyer ➤", type="primary")
+    final_json = json.dumps(
+        {
+            "message": result.message,
+            "metadata": result.metadata,
+            "humanized_message": result.humanized_message,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    st.markdown("**sortie JSON finale**")
+    st.code(final_json, language="json")
+
+
+with tab_single:
+    st.markdown(RESULT_CARD_CSS, unsafe_allow_html=True)
+    st.caption(
+        "Collez un « Input brut » (une entrée de la colonne du Google Sheets) et validez. "
+        "Le pipeline appelle le modèle choisi pour le Cleaning, puis applique l'Humanizer en local (sans appel LLM). "
+        "L'historique de la conversation reste affiché tant que vous ne rechargez pas la page ou ne cliquez pas sur « Effacer »."
+    )
+
+    if "conversation" not in st.session_state:
+        st.session_state.conversation = _load_conversation()  # list of (raw_input, PipelineResult)
+
+    top_col1, top_col2 = st.columns([1, 5])
+    with top_col1:
+        if st.button("🗑 Effacer la conversation"):
+            st.session_state.conversation = []
+            _save_conversation(st.session_state.conversation)
+            st.rerun()
+    with top_col2:
+        if st.session_state.conversation:
+            history_json = json.dumps(
+                [
+                    {
+                        "input_raw": raw,
+                        "message": r.message,
+                        "metadata": r.metadata,
+                        "humanized_message": r.humanized_message,
+                        "applied_rules": r.applied_rules,
+                        "error": r.error,
+                    }
+                    for raw, r in st.session_state.conversation
+                ],
+                ensure_ascii=False,
+                indent=2,
+            )
+            st.download_button(
+                "💾 Télécharger l'historique (JSON)",
+                data=history_json,
+                file_name="conversation_humanizer.json",
+                mime="application/json",
+            )
+
+    # Replay every past exchange so nothing disappears on the next message
+    price = fetch_model_pricing(API_KEY).get(model) if st.session_state.conversation else None
+    for raw, result in st.session_state.conversation:
+        render_exchange(raw, result, price)
+
+    with st.form(key="send_form", clear_on_submit=True):
+        raw_input = st.text_area("Input brut", height=100, placeholder="Collez le message brut ici…")
+        send = st.form_submit_button("Envoyer ➤", type="primary")
 
     if send and raw_input.strip():
         with st.spinner("Traitement en cours…"):
@@ -144,57 +315,10 @@ with tab_single:
             try:
                 result: PipelineResult = pipeline.run(raw_input)
             except Exception as e:
-                result = None
-                st.error(f"Erreur inattendue : {e}")
-
-        if result is not None:
-            if result.error:
-                st.error(result.error)
-            else:
-                st.markdown(
-                    """
-                    <style>
-                    .result-card { background:#e5e7eb; border-radius:12px; padding:16px 18px; margin-top:8px; }
-                    .result-card .field-title { color:#2563eb; font-weight:700; font-size:13px;
-                                                 margin-top:14px; margin-bottom:2px; }
-                    .result-card .field-value { color:#111827; font-size:14px; white-space:pre-wrap; }
-                    .result-card .meta-line { color:#4b5563; font-size:12px; margin-top:8px; }
-                    </style>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-                rules_txt = ", ".join(result.applied_rules) if result.applied_rules else "aucune"
-                price = fetch_model_pricing(API_KEY).get(model)
-                cost = estimate_cost_usd(result.total_tokens or 0, result.completion_tokens or 0, price)
-                cost_txt = f"  •  coût ≈ ${cost:.6f}" if cost is not None else ""
-
-                st.markdown(
-                    f"""
-                    <div class="result-card">
-                        <div class="field-title">message (Cleaning)</div>
-                        <div class="field-value">{html.escape(result.message) or "(vide)"}</div>
-                        <div class="field-title">metadata</div>
-                        <div class="field-value">{html.escape(result.metadata) or "(vide)"}</div>
-                        <div class="field-title">humanized_message</div>
-                        <div class="field-value">{html.escape(result.humanized_message) or "(vide)"}</div>
-                        <div class="meta-line">règles appliquées : {html.escape(rules_txt)}  •  latence : {result.latency_ms:.0f} ms{cost_txt}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-                final_json = json.dumps(
-                    {
-                        "message": result.message,
-                        "metadata": result.metadata,
-                        "humanized_message": result.humanized_message,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-                st.markdown("**sortie JSON finale**")
-                st.code(final_json, language="json")
+                result = PipelineResult(raw_input, "", "", "", [], 0.0, None, None, None, str(e))
+        st.session_state.conversation.append((raw_input, result))
+        _save_conversation(st.session_state.conversation)
+        st.rerun()
 
 # -- Batch tab ----------------------------------------------------------
 
