@@ -15,6 +15,7 @@ Run locally with:
 
 from __future__ import annotations
 
+import html
 import json
 
 import pandas as pd
@@ -150,6 +151,39 @@ with tab_single:
             if result.error:
                 st.error(result.error)
             else:
+                st.markdown(
+                    """
+                    <style>
+                    .result-card { background:#e5e7eb; border-radius:12px; padding:16px 18px; margin-top:8px; }
+                    .result-card .field-title { color:#2563eb; font-weight:700; font-size:13px;
+                                                 margin-top:14px; margin-bottom:2px; }
+                    .result-card .field-value { color:#111827; font-size:14px; white-space:pre-wrap; }
+                    .result-card .meta-line { color:#4b5563; font-size:12px; margin-top:8px; }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                rules_txt = ", ".join(result.applied_rules) if result.applied_rules else "aucune"
+                price = fetch_model_pricing(API_KEY).get(model)
+                cost = estimate_cost_usd(result.total_tokens or 0, result.completion_tokens or 0, price)
+                cost_txt = f"  •  coût ≈ ${cost:.6f}" if cost is not None else ""
+
+                st.markdown(
+                    f"""
+                    <div class="result-card">
+                        <div class="field-title">message (Cleaning)</div>
+                        <div class="field-value">{html.escape(result.message) or "(vide)"}</div>
+                        <div class="field-title">metadata</div>
+                        <div class="field-value">{html.escape(result.metadata) or "(vide)"}</div>
+                        <div class="field-title">humanized_message</div>
+                        <div class="field-value">{html.escape(result.humanized_message) or "(vide)"}</div>
+                        <div class="meta-line">règles appliquées : {html.escape(rules_txt)}  •  latence : {result.latency_ms:.0f} ms{cost_txt}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
                 final_json = json.dumps(
                     {
                         "message": result.message,
@@ -159,6 +193,7 @@ with tab_single:
                     ensure_ascii=False,
                     indent=2,
                 )
+                st.markdown("**sortie JSON finale**")
                 st.code(final_json, language="json")
 
 # -- Batch tab ----------------------------------------------------------
