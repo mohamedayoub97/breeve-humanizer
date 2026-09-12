@@ -1,0 +1,1521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Breeve — the humanizer studio</title>
+<meta name="description" content="A two-stage text pipeline: an AI cleaning stage, then a deterministic rule engine that reintroduces the small imperfections real people leave behind.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,340..760;1,9..144,400..600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   TOKENS
+   ============================================================ */
+:root{
+  --ink-950:#FAF7EF;   /* page background + recessed wells (inputs, code, diffs) */
+  --ink-900:#FFFFFF;   /* elevated card surface */
+  --ink-850:#FFFCF5;   /* secondary card tone, for subtle gradients */
+  --ink-800:#F1EBDB;
+  --ink-750:#E9E1CC;
+  --line: rgba(40,33,20,0.10);
+  --line-strong: rgba(40,33,20,0.20);
+  --paper:#241E13;     /* primary text */
+  --paper-dim:#6C6046;
+  --paper-faint:#7A6E54;
+  --brass:#976C24;
+  --brass-bright:#6E4C15;
+  --brass-wash: rgba(151,108,36,0.10);
+  --rust:#A8452B;
+  --rust-bright:#8A3620;
+  --rust-wash: rgba(168,69,43,0.12);
+  --sage:#4B6B3E;
+  --sage-wash: rgba(75,107,62,0.12);
+  --on-accent:#FFFDF7;  /* text/icons placed on solid accent fills */
+  --nav-blur-bg: rgba(250,247,239,0.82);
+  --glow-brass: rgba(151,108,36,0.20);
+  --glow-sage: rgba(75,107,62,0.14);
+  --glass-bg: rgba(255,253,247,0.66);
+  --glass-border: rgba(40,33,20,0.12);
+  --glass-highlight: rgba(255,255,255,0.7);
+  --grain-blend: multiply;
+  --grain-opacity: 0.025;
+  --radius-sm:8px;
+  --radius-md:14px;
+  --radius-lg:24px;
+  --shadow-lift: 0 30px 70px -32px rgba(80,58,20,0.28);
+  --shadow-soft: 0 14px 34px -20px rgba(80,58,20,0.22);
+  --font-display:'Fraunces', Georgia, serif;
+  --font-mono:'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  --container: 1180px;
+  color-scheme: light;
+}
+
+/* ============================================================
+   DARK THEME OVERRIDE — toggled via [data-theme="dark"] on <html>
+   ============================================================ */
+:root[data-theme="dark"]{
+  --ink-950:#14120E;
+  --ink-900:#1B1810;
+  --ink-850:#211C14;
+  --ink-800:#272119;
+  --ink-750:#2E271C;
+  --line: rgba(205,161,83,0.14);
+  --line-strong: rgba(205,161,83,0.28);
+  --paper:#F4EEE1;
+  --paper-dim:#B7AA8C;
+  --paper-faint:#94886D;
+  --brass:#CDA153;
+  --brass-bright:#E9C989;
+  --brass-wash: rgba(205,161,83,0.10);
+  --rust:#BE6349;
+  --rust-bright:#D98467;
+  --rust-wash: rgba(190,99,73,0.14);
+  --sage:#8CA579;
+  --sage-wash: rgba(140,165,121,0.14);
+  --on-accent:#14120E;
+  --nav-blur-bg: rgba(20,18,14,0.78);
+  --glow-brass: rgba(205,161,83,0.16);
+  --glow-sage: rgba(140,165,121,0.12);
+  --glass-bg: rgba(33,28,20,0.55);
+  --glass-border: rgba(205,161,83,0.22);
+  --glass-highlight: rgba(255,255,255,0.06);
+  --grain-blend: overlay;
+  --grain-opacity: 0.035;
+  --shadow-lift: 0 24px 70px -30px rgba(0,0,0,0.65);
+  --shadow-soft: 0 14px 34px -20px rgba(0,0,0,0.5);
+  color-scheme: dark;
+}
+
+/* ============================================================
+   RESET
+   ============================================================ */
+*,*::before,*::after{ box-sizing:border-box; }
+html{ scroll-behavior:smooth; }
+body{
+  margin:0;
+  background:var(--ink-950);
+  color:var(--paper);
+  font-family:var(--font-mono);
+  font-size:15.5px;
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+  overflow-x:hidden;
+  transition:background-color .45s ease, color .45s ease;
+}
+img,svg{ display:block; max-width:100%; }
+a{ color:inherit; text-decoration:none; }
+button{ font-family:inherit; cursor:pointer; }
+textarea,input,select{ font-family:inherit; color:inherit; }
+ul,dl,dd,p,h1,h2,h3,h4{ margin:0; }
+::selection{ background:var(--brass); color:var(--on-accent); }
+
+/* faint paper/film grain — blend mode + opacity flip per theme */
+body::before{
+  content:"";
+  position:fixed; inset:0;
+  z-index:2000;
+  pointer-events:none;
+  opacity:var(--grain-opacity);
+  mix-blend-mode:var(--grain-blend);
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* cross-theme transitions on the surfaces that change color when toggled */
+.nav, .demo-card, .stage-card, .rule-card, .rule-example, .studio-sidebar,
+.studio-main, .result-card, .json-block, .demo-input, .chat-form textarea,
+.select, .input, .dropzone, .diff-view, .chat-empty, .switch-track,
+.site-footer, .tag, .chip, .batch-table th, .batch-table td, .theme-toggle-track,
+.theme-toggle-knob{
+  transition:background-color .4s ease, border-color .4s ease, color .4s ease, box-shadow .4s ease;
+}
+
+:focus-visible{
+  outline:2px solid var(--brass);
+  outline-offset:3px;
+  border-radius:4px;
+}
+
+/* ============================================================
+   TYPE
+   ============================================================ */
+.kicker{
+  font-family:var(--font-mono);
+  font-size:0.8rem;
+  letter-spacing:0.02em;
+  color:var(--brass);
+  margin:0 0 1.1rem;
+}
+.display-xl{
+  font-family:var(--font-display);
+  font-optical-sizing:auto;
+  font-weight:520;
+  font-size:clamp(2.5rem, 3.4vw + 1.4rem, 4.6rem);
+  line-height:1.06;
+  letter-spacing:-0.01em;
+  color:var(--paper);
+  max-width:14ch;
+}
+.display-lg{
+  font-family:var(--font-display);
+  font-weight:520;
+  font-size:clamp(2rem, 2.1vw + 1.2rem, 3rem);
+  line-height:1.12;
+  letter-spacing:-0.008em;
+  max-width:18ch;
+}
+.lead{
+  font-size:1.02rem;
+  color:var(--paper-dim);
+  max-width:52ch;
+  line-height:1.7;
+}
+.section-sub{
+  color:var(--paper-dim);
+  max-width:56ch;
+  font-size:0.98rem;
+  margin-top:0.9rem;
+}
+em.accent{
+  font-family:var(--font-display);
+  font-style:italic;
+  font-weight:400;
+  color:var(--paper);
+}
+
+/* ============================================================
+   LAYOUT HELPERS
+   ============================================================ */
+.wrap{
+  max-width:var(--container);
+  margin:0 auto;
+  padding:0 clamp(1.25rem, 4vw, 2.5rem);
+}
+section{ padding:7.5rem 0; position:relative; }
+.section-head{ max-width:640px; margin-bottom:3.2rem; }
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+.btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:0.5rem;
+  padding:0.85rem 1.5rem;
+  border-radius:999px;
+  font-size:0.86rem;
+  font-weight:500;
+  letter-spacing:0.01em;
+  border:1px solid transparent;
+  transition:transform .18s ease, background .18s ease, border-color .18s ease, color .18s ease;
+  white-space:nowrap;
+}
+.btn:active{ transform:translateY(1px); }
+.btn-primary{
+  background:var(--brass);
+  color:var(--on-accent);
+}
+.btn-primary:hover{ background:var(--brass-bright); }
+.btn-ghost{
+  background:transparent;
+  border-color:var(--line-strong);
+  color:var(--paper);
+}
+.btn-ghost:hover{ border-color:var(--brass); color:var(--brass-bright); }
+.btn-sm{ padding:0.55rem 1.05rem; font-size:0.78rem; }
+.btn:disabled{ opacity:0.45; cursor:not-allowed; }
+
+/* ============================================================
+   NAV
+   ============================================================ */
+.nav{
+  position:sticky; top:0; z-index:100;
+  border-bottom:1px solid transparent;
+  transition:border-color .3s ease, background .3s ease, backdrop-filter .3s ease;
+}
+.nav.is-scrolled{
+  background:var(--nav-blur-bg);
+  backdrop-filter:blur(14px);
+  border-bottom-color:var(--line);
+}
+.nav-inner{
+  max-width:var(--container);
+  margin:0 auto;
+  padding:1.15rem clamp(1.25rem, 4vw, 2.5rem);
+  display:flex;
+  align-items:center;
+  gap:2.2rem;
+}
+.brand{
+  display:flex; align-items:center; gap:0.55rem;
+  margin-right:auto;
+}
+.brand-mark{ color:var(--brass); flex:none; }
+.brand-word{
+  font-family:var(--font-display);
+  font-style:italic;
+  font-weight:560;
+  font-size:1.2rem;
+  letter-spacing:0.01em;
+}
+.nav-links{ display:flex; gap:1.8rem; font-size:0.86rem; color:var(--paper-dim); }
+.nav-links a:hover{ color:var(--paper); }
+.nav-toggle{
+  display:none;
+  background:none; border:1px solid var(--line-strong); border-radius:8px;
+  width:38px; height:34px; position:relative;
+}
+.nav-toggle span, .nav-toggle span::before, .nav-toggle span::after{
+  content:""; position:absolute; left:9px; right:9px; height:1.5px; background:var(--paper);
+}
+.nav-toggle span{ top:16px; }
+.nav-toggle span::before{ top:-6px; }
+.nav-toggle span::after{ top:6px; }
+
+.theme-toggle{ background:none; border:none; padding:0; display:flex; align-items:center; flex:none; }
+.theme-toggle-track{
+  width:50px; height:28px; border-radius:999px;
+  background:var(--ink-900); border:1px solid var(--line-strong);
+  display:flex; align-items:center; padding:2px; position:relative;
+}
+.theme-toggle-knob{
+  width:22px; height:22px; border-radius:50%;
+  background:var(--brass);
+  display:flex; align-items:center; justify-content:center; position:relative;
+  transform:translateX(0);
+  transition:transform .4s cubic-bezier(.65,0,.35,1), background-color .4s ease, box-shadow .4s ease;
+  box-shadow:0 2px 8px rgba(20,16,8,0.28), 0 0 0 5px var(--brass-wash);
+}
+:root[data-theme="dark"] .theme-toggle-knob{ transform:translateX(22px); }
+.theme-toggle-knob svg{
+  position:absolute; color:var(--on-accent);
+  transition:opacity .3s ease, transform .45s ease;
+}
+.theme-toggle-knob .icon-sun{ opacity:1; transform:rotate(0deg) scale(1); }
+.theme-toggle-knob .icon-moon{ opacity:0; transform:rotate(-70deg) scale(0.5); }
+:root[data-theme="dark"] .theme-toggle-knob .icon-sun{ opacity:0; transform:rotate(70deg) scale(0.5); }
+:root[data-theme="dark"] .theme-toggle-knob .icon-moon{ opacity:1; transform:rotate(0deg) scale(1); }
+.theme-toggle:hover .theme-toggle-track{ border-color:var(--brass); }
+.theme-toggle:focus-visible .theme-toggle-track{ outline:2px solid var(--brass); outline-offset:2px; }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero{
+  padding-top:4.2rem;
+  padding-bottom:6rem;
+  overflow:hidden;
+}
+.hero::before{
+  content:"";
+  position:absolute;
+  top:-22%; right:-10%;
+  width:58vw; height:58vw;
+  max-width:780px; max-height:780px;
+  background:radial-gradient(circle at 50% 50%, var(--glow-brass), rgba(0,0,0,0) 68%);
+  pointer-events:none;
+  z-index:0;
+}
+.hero::after{
+  content:"";
+  position:absolute;
+  bottom:-14%; left:-10%;
+  width:34vw; height:34vw;
+  max-width:480px; max-height:480px;
+  background:radial-gradient(circle at 50% 50%, var(--glow-sage), rgba(0,0,0,0) 70%);
+  pointer-events:none;
+  z-index:0;
+}
+.hero-inner{
+  position:relative; z-index:1;
+  display:grid;
+  grid-template-columns:1.05fr 0.95fr;
+  gap:clamp(2rem, 5vw, 4.5rem);
+  align-items:start;
+}
+.hero-copy{ padding-top:0.5rem; }
+.hero-actions{ display:flex; gap:0.9rem; flex-wrap:wrap; margin:2.1rem 0 2.6rem; }
+.hero-facts{
+  display:flex; gap:2.2rem;
+  border-top:1px solid var(--line);
+  padding-top:1.4rem;
+}
+.hero-facts > div{ display:flex; flex-direction:column; gap:0.15rem; }
+.hero-facts dt{
+  font-family:var(--font-display); font-weight:560; font-style:italic;
+  font-size:1.6rem; color:var(--brass-bright);
+}
+.hero-facts dd{ margin:0; font-size:0.78rem; color:var(--paper-faint); }
+
+.demo-card{
+  background:var(--glass-bg);
+  backdrop-filter:blur(22px) saturate(160%);
+  -webkit-backdrop-filter:blur(22px) saturate(160%);
+  border:1px solid var(--glass-border);
+  border-radius:var(--radius-lg);
+  padding:1.5rem;
+  box-shadow:var(--shadow-lift), inset 0 1px 0 var(--glass-highlight);
+  transition:background-color .4s ease, border-color .4s ease, box-shadow .4s ease;
+}
+.demo-card-head{ display:flex; align-items:center; gap:0.6rem; margin-bottom:1rem; }
+.demo-dot{ width:8px; height:8px; border-radius:50%; background:var(--sage); box-shadow:0 0 0 3px var(--sage-wash); }
+.demo-title{ font-size:0.82rem; color:var(--paper-dim); }
+.demo-input{
+  width:100%;
+  background:var(--ink-950);
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  color:var(--paper);
+  padding:0.9rem 1rem;
+  font-size:0.92rem;
+  line-height:1.55;
+  resize:vertical;
+  min-height:88px;
+}
+.demo-input:focus{ border-color:var(--brass); }
+.demo-controls{
+  display:flex; align-items:center; gap:0.9rem; flex-wrap:wrap;
+  margin:1rem 0 0.3rem;
+}
+.demo-hint{ font-size:0.74rem; color:var(--paper-faint); }
+.demo-output{ margin-top:1.1rem; }
+.diff-view{
+  background:var(--ink-950);
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  padding:0.95rem 1.05rem;
+  font-size:0.9rem;
+  line-height:1.7;
+  min-height:64px;
+  color:var(--paper-dim);
+}
+.diff-view del{ text-decoration:none; color:var(--rust); background:var(--rust-wash); border-radius:3px; }
+.diff-view ins{ text-decoration:none; color:var(--sage); background:var(--sage-wash); border-radius:3px; }
+.rule-chips{ display:flex; gap:0.45rem; flex-wrap:wrap; margin-top:0.8rem; min-height:1.6rem; }
+.chip{
+  font-size:0.72rem;
+  padding:0.28rem 0.62rem;
+  border-radius:999px;
+  border:1px solid var(--line-strong);
+  color:var(--paper-dim);
+}
+.chip--on{ border-color:var(--brass); color:var(--brass-bright); background:var(--brass-wash); }
+.chip--seed{ color:var(--paper-faint); border-style:dashed; }
+
+/* ============================================================
+   PIPELINE
+   ============================================================ */
+.pipeline-grid{
+  display:grid;
+  grid-template-columns:1fr auto 1fr;
+  gap:1.6rem;
+  align-items:center;
+}
+.stage-card{
+  background:var(--ink-900);
+  border:1px solid var(--line);
+  border-radius:var(--radius-lg);
+  padding:2.1rem 2rem;
+  position:relative;
+}
+.stage-card--accent{ border-color:var(--line-strong); background:linear-gradient(160deg, var(--ink-850), var(--ink-900)); }
+.stage-index{
+  font-family:var(--font-display); font-style:italic; font-weight:560;
+  font-size:2.6rem; color:var(--line-strong);
+  display:block; margin-bottom:0.6rem;
+}
+.stage-card--accent .stage-index{ color:var(--brass); opacity:0.55; }
+.stage-card h3{ font-family:var(--font-display); font-weight:560; font-size:1.5rem; margin-bottom:0.7rem; }
+.stage-card p{ color:var(--paper-dim); font-size:0.92rem; line-height:1.65; }
+.stage-tags{ display:flex; gap:0.5rem; margin-top:1.3rem; flex-wrap:wrap; }
+.tag{
+  font-size:0.72rem; padding:0.32rem 0.7rem; border-radius:7px;
+  background:var(--ink-950); border:1px solid var(--line); color:var(--paper-faint);
+}
+.tag--brass{ border-color:var(--line-strong); color:var(--brass-bright); }
+.pipeline-arrow{ color:var(--brass); display:flex; justify-content:center; }
+
+/* ============================================================
+   RULES
+   ============================================================ */
+.rules-strip{
+  display:grid;
+  grid-auto-flow:column;
+  grid-auto-columns:minmax(260px, 1fr);
+  gap:1.25rem;
+  overflow-x:auto;
+  padding-bottom:0.6rem;
+  scroll-snap-type:x proximity;
+}
+.rules-strip::-webkit-scrollbar{ height:6px; }
+.rules-strip::-webkit-scrollbar-thumb{ background:var(--line-strong); border-radius:6px; }
+.rule-card{
+  scroll-snap-align:start;
+  background:var(--ink-900);
+  border:1px solid var(--line);
+  border-radius:var(--radius-md);
+  padding:1.6rem 1.5rem 1.5rem;
+  display:flex; flex-direction:column;
+  transition:border-color .2s ease, transform .2s ease;
+}
+.rule-card:hover{ border-color:var(--line-strong); transform:translateY(-3px); }
+.rule-index{
+  font-family:var(--font-display); font-style:italic; font-weight:560;
+  font-size:2rem; color:var(--line-strong); margin-bottom:0.4rem;
+}
+.rule-name{
+  font-family:var(--font-display); font-weight:560; font-size:1.15rem;
+  display:flex; align-items:baseline; gap:0.55rem; margin-bottom:0.5rem;
+}
+.rule-code{ font-family:var(--font-mono); font-size:0.68rem; color:var(--brass); font-style:normal; font-weight:600; }
+.rule-desc{ color:var(--paper-dim); font-size:0.86rem; line-height:1.55; margin-bottom:1.1rem; }
+.rule-example{ background:var(--ink-950); border:1px solid var(--line); border-radius:var(--radius-sm); padding:0.85rem 0.9rem; margin-bottom:1rem; flex:1; }
+.ex-before, .ex-after{ font-size:0.82rem; line-height:1.6; }
+.ex-before{ color:var(--paper-faint); text-decoration:line-through; text-decoration-color:var(--rust); text-decoration-thickness:1.5px; }
+.ex-after{ color:var(--sage); margin-top:0.5rem; }
+.rule-shuffle{
+  align-self:flex-start;
+  background:none; border:none; color:var(--paper-faint);
+  font-size:0.76rem; padding:0; display:flex; align-items:center; gap:0.4rem;
+}
+.rule-shuffle:hover{ color:var(--brass-bright); }
+
+/* ============================================================
+   STUDIO
+   ============================================================ */
+.studio-shell{
+  display:grid;
+  grid-template-columns:270px 1fr;
+  gap:1.5rem;
+  align-items:start;
+}
+.studio-sidebar{
+  background:var(--ink-900);
+  border:1px solid var(--line);
+  border-radius:var(--radius-lg);
+  padding:1.5rem;
+  position:sticky; top:5.5rem;
+}
+.side-block{ margin-bottom:1.6rem; }
+.side-block:last-child{ margin-bottom:0; }
+.side-label{ display:block; font-size:0.76rem; color:var(--paper-faint); margin-bottom:0.6rem; }
+.select, .input{
+  width:100%;
+  background:var(--ink-950);
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  color:var(--paper);
+  padding:0.6rem 0.7rem;
+  font-size:0.83rem;
+}
+.select:focus, .input:focus{ border-color:var(--brass); }
+.rule-row{ margin-bottom:1.1rem; }
+.rule-row:last-child{ margin-bottom:0; }
+.rule-row-top{ display:flex; align-items:center; justify-content:space-between; margin-bottom:0.45rem; }
+.rule-row-name{ font-size:0.8rem; display:flex; align-items:center; gap:0.5rem; }
+.rule-row-name .rule-code{ color:var(--brass); }
+.rule-row-pct{ font-size:0.72rem; color:var(--paper-faint); min-width:2.4em; text-align:right; }
+
+.switch{ position:relative; width:32px; height:18px; flex:none; }
+.switch input{ position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; }
+.switch-track{
+  position:absolute; inset:0; background:var(--ink-950); border:1px solid var(--line-strong);
+  border-radius:999px; transition:background .18s ease;
+}
+.switch-track::after{
+  content:""; position:absolute; top:2px; left:2px; width:12px; height:12px; border-radius:50%;
+  background:var(--paper-faint); transition:transform .18s ease, background .18s ease;
+}
+.switch input:checked + .switch-track{ background:var(--brass-wash); border-color:var(--brass); }
+.switch input:checked + .switch-track::after{ transform:translateX(14px); background:var(--brass); }
+
+input[type="range"]{
+  -webkit-appearance:none; appearance:none;
+  width:100%; height:3px; background:var(--line-strong); border-radius:3px; outline:none;
+}
+input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none; appearance:none;
+  width:14px; height:14px; border-radius:50%; background:var(--brass);
+  border:2px solid var(--ink-950); cursor:pointer;
+}
+input[type="range"]::-moz-range-thumb{
+  width:14px; height:14px; border-radius:50%; background:var(--brass); border:2px solid var(--ink-950); cursor:pointer;
+}
+
+.studio-main{
+  background:var(--ink-900);
+  border:1px solid var(--line);
+  border-radius:var(--radius-lg);
+  overflow:hidden;
+}
+.studio-tabs{ display:flex; border-bottom:1px solid var(--line); }
+.tab-btn{
+  background:none; border:none; color:var(--paper-faint);
+  padding:1.1rem 1.4rem; font-size:0.85rem; position:relative;
+  border-bottom:2px solid transparent; margin-bottom:-1px;
+}
+.tab-btn.active{ color:var(--paper); border-bottom-color:var(--brass); }
+.tab-panel{ display:none; padding:1.5rem; }
+.tab-panel.active{ display:block; }
+
+.chat-toolbar{ display:flex; justify-content:flex-end; gap:0.6rem; margin-bottom:1rem; }
+.chat-log{ display:flex; flex-direction:column; gap:1.1rem; max-height:520px; overflow-y:auto; padding-right:0.3rem; margin-bottom:1.1rem; }
+.chat-empty{ color:var(--paper-faint); font-size:0.86rem; padding:2rem 0; text-align:center; border:1px dashed var(--line); border-radius:var(--radius-md); }
+.user-bubble{
+  align-self:flex-end;
+  background:var(--brass);
+  color:var(--on-accent);
+  border-radius:14px 14px 3px 14px;
+  padding:0.7rem 1rem;
+  max-width:85%;
+  font-size:0.88rem;
+  white-space:pre-wrap;
+}
+.result-card{
+  background:var(--ink-950);
+  border:1px solid var(--line);
+  border-radius:var(--radius-md);
+  padding:1.1rem 1.2rem;
+}
+.field-title{ font-size:0.7rem; color:var(--paper-faint); margin-top:0.9rem; margin-bottom:0.3rem; }
+.field-title:first-child{ margin-top:0; }
+.field-value{ font-size:0.88rem; white-space:pre-wrap; }
+.meta-chips{ display:flex; gap:0.4rem; flex-wrap:wrap; }
+.result-foot{ display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center; margin-top:1rem; padding-top:0.9rem; border-top:1px solid var(--line); }
+.json-block{
+  margin-top:0.9rem; background:var(--ink-900); border:1px solid var(--line); border-radius:var(--radius-sm);
+  padding:0.85rem 0.95rem; font-size:0.78rem; overflow-x:auto; color:var(--paper-dim);
+}
+.json-block .jk{ color:var(--brass); }
+.json-block .jv{ color:var(--paper); }
+
+.chat-form{ display:flex; gap:0.7rem; align-items:flex-end; }
+.chat-form textarea{
+  flex:1; background:var(--ink-950); border:1px solid var(--line); border-radius:var(--radius-sm);
+  color:var(--paper); padding:0.8rem 0.9rem; font-size:0.9rem; resize:vertical; min-height:52px;
+}
+.chat-form textarea:focus{ border-color:var(--brass); }
+
+.dropzone{
+  border:1px dashed var(--line-strong); border-radius:var(--radius-md);
+  padding:2.6rem 1.5rem; text-align:center; cursor:pointer;
+  transition:border-color .18s ease, background .18s ease;
+}
+.dropzone:hover, .dropzone.is-drag{ border-color:var(--brass); background:var(--brass-wash); }
+.dz-title{ font-size:0.95rem; margin-bottom:0.3rem; }
+.dz-sub{ font-size:0.78rem; color:var(--paper-faint); margin-bottom:1.1rem; }
+.batch-status{ font-size:0.85rem; color:var(--paper-dim); margin-top:1rem; }
+.batch-progress{ height:6px; background:var(--ink-950); border-radius:6px; margin-top:1rem; overflow:hidden; border:1px solid var(--line); }
+.batch-progress-bar{ height:100%; width:0%; background:var(--brass); transition:width .12s linear; }
+.batch-results{ margin-top:1.4rem; }
+.batch-results-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:0.9rem; gap:1rem; flex-wrap:wrap; }
+.batch-results-head span{ font-size:0.82rem; color:var(--paper-dim); }
+.table-wrap{ border:1px solid var(--line); border-radius:var(--radius-sm); overflow:auto; max-height:420px; }
+.batch-table{ width:100%; border-collapse:collapse; font-size:0.8rem; }
+.batch-table th{
+  position:sticky; top:0; background:var(--ink-850); text-align:left; padding:0.6rem 0.8rem;
+  color:var(--paper-faint); font-weight:500; border-bottom:1px solid var(--line);
+}
+.batch-table td{ padding:0.6rem 0.8rem; border-bottom:1px solid var(--line); vertical-align:top; color:var(--paper-dim); }
+.batch-table td.mono-strong{ color:var(--paper); }
+.batch-table tr:last-child td{ border-bottom:none; }
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
+.site-footer{ border-top:1px solid var(--line); padding:3.2rem 0; }
+.footer-inner{ display:flex; align-items:center; gap:1.6rem; flex-wrap:wrap; justify-content:space-between; }
+.footer-tag{ color:var(--paper-faint); font-size:0.84rem; }
+.footer-links{ display:flex; gap:1.4rem; font-size:0.82rem; color:var(--paper-dim); }
+.footer-links a:hover{ color:var(--paper); }
+
+/* ============================================================
+   MOTION
+   ============================================================ */
+.reveal{ opacity:0; transform:translateY(14px); transition:opacity .7s ease, transform .7s ease; }
+.reveal.is-visible{ opacity:1; transform:none; }
+
+@media (prefers-reduced-motion: reduce){
+  html{ scroll-behavior:auto; }
+  .reveal{ opacity:1; transform:none; transition:none; }
+  *{ animation-duration:0.01ms !important; transition-duration:0.01ms !important; }
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 980px){
+  .hero-inner{ grid-template-columns:1fr; }
+  .pipeline-grid{ grid-template-columns:1fr; }
+  .pipeline-arrow{ transform:rotate(90deg); padding:0.4rem 0; }
+  .studio-shell{ grid-template-columns:1fr; }
+  .studio-sidebar{ position:static; }
+}
+@media (max-width: 720px){
+  section{ padding:4.6rem 0; }
+  .nav-links{
+    display:none;
+    position:absolute; top:100%; left:0; right:0;
+    background:var(--ink-900); border-bottom:1px solid var(--line);
+    flex-direction:column; gap:0; padding:0.5rem 0;
+  }
+  .nav-links.is-open{ display:flex; }
+  .nav-links a{ padding:0.9rem clamp(1.25rem, 4vw, 2.5rem); }
+  .nav-toggle{ display:block; }
+  .nav .btn-primary.btn-sm{ display:none; }
+  .hero-facts{ flex-wrap:wrap; gap:1.4rem 2rem; }
+  .chat-form{ flex-direction:column; align-items:stretch; }
+}
+</style>
+</head>
+<body>
+
+<header class="nav" id="siteNav">
+  <div class="nav-inner">
+    <a class="brand" href="#top">
+      <span class="brand-mark"><svg viewBox="0 0 32 32" width="20" height="20" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.4"/><path d="M10 19L16 12L22 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="brand-word">Breeve</span>
+    </a>
+    <nav class="nav-links" id="navLinks" aria-label="Primary">
+      <a href="#pipeline">Pipeline</a>
+      <a href="#rules">Rules</a>
+      <a href="#studio">Studio</a>
+    </nav>
+    <a class="btn btn-primary btn-sm" href="#studio">Open the studio</a>
+    <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false" aria-label="Switch to dark background">
+      <span class="theme-toggle-track">
+        <span class="theme-toggle-knob">
+          <svg class="icon-sun" viewBox="0 0 24 24" width="13" height="13" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="1.8"/><path d="M12 2.5V5M12 19V21.5M4.2 4.2L6 6M18 18L19.8 19.8M2.5 12H5M19 12H21.5M4.2 19.8L6 18M18 6L19.8 4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" width="13" height="13" fill="none" aria-hidden="true"><path d="M20 14.2A8.5 8.5 0 1 1 9.8 4a6.6 6.6 0 0 0 10.2 10.2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        </span>
+      </span>
+    </button>
+    <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false"><span></span></button>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============ HERO ============ -->
+  <section class="hero" id="top">
+    <div class="wrap hero-inner">
+      <div class="hero-copy">
+        <p class="kicker">A two-stage pipeline for outbound text</p>
+        <h1 class="display-xl">Perfectly clean writing is the tell.</h1>
+        <p class="lead">Breeve runs a raw message through an AI cleaning stage, then a small, deterministic rule engine reintroduces the imperfections real people leave behind — a dropped accent, a fused word, a missing comma — before anything goes out.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#studio">Open the studio</a>
+          <a class="btn btn-ghost" href="#rules">See the five rules</a>
+        </div>
+        <dl class="hero-facts">
+          <div><dt>5</dt><dd>local rules</dd></div>
+          <div><dt>0</dt><dd>extra model calls</dd></div>
+          <div><dt>1</dt><dd>seed, fully reproducible</dd></div>
+        </dl>
+      </div>
+
+      <div class="hero-demo">
+        <div class="demo-card">
+          <div class="demo-card-head">
+            <span class="demo-dot"></span>
+            <span class="demo-title">Try it — this runs the real rule engine</span>
+          </div>
+          <textarea id="heroInput" class="demo-input" rows="3" spellcheck="false">Bonjour ! Je perçois beaucoup d'énergie positive autour de vous en ce moment. Voulez-vous que je continue cette lecture ensemble ?</textarea>
+          <div class="demo-controls">
+            <button class="btn btn-primary btn-sm" id="heroRun" type="button">Run humanizer</button>
+            <span class="demo-hint">Each rule fires at 50%, same as the studio default.</span>
+          </div>
+          <div class="demo-output">
+            <div class="diff-view" id="heroDiff" aria-live="polite">Struck-through text was removed or changed — click run to see it happen.</div>
+            <div class="rule-chips" id="heroChips"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PIPELINE ============ -->
+  <section class="pipeline" id="pipeline">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <h2 class="display-lg">Two stages, one message.</h2>
+        <p class="section-sub">Cleaning understands what was said. The humanizer decides how it should sound leaving the building.</p>
+      </div>
+      <div class="pipeline-grid">
+        <article class="stage-card reveal">
+          <span class="stage-index">01</span>
+          <h3>Cleaning</h3>
+          <p>A language model reshapes the raw input into a structured message and a short metadata note — topic, tone, intent — ready for whatever happens next.</p>
+          <div class="stage-tags"><span class="tag">Configurable model</span><span class="tag">Runs once per message</span></div>
+        </article>
+        <div class="pipeline-arrow" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 12H20M20 12L14 6M20 12L14 18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <article class="stage-card stage-card--accent reveal">
+          <span class="stage-index">02</span>
+          <h3>Humanizer</h3>
+          <p>Five local rules probabilistically rough up the cleaned text — never the metadata. No model call, no added latency, fully reproducible once you set a seed.</p>
+          <div class="stage-tags"><span class="tag tag--brass">Pure rule engine</span><span class="tag tag--brass">Deterministic</span></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RULES ============ -->
+  <section class="rules" id="rules">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <h2 class="display-lg">Five ways to sound less like a machine.</h2>
+        <p class="section-sub">Each rule fires independently, at a probability you set, and changes at most one thing per message.</p>
+      </div>
+
+      <div class="rules-strip" id="rulesStrip">
+        <article class="rule-card" data-rule="r01">
+          <span class="rule-index">01</span>
+          <h3 class="rule-name">Abbreviation <span class="rule-code">R-01</span></h3>
+          <p class="rule-desc">Swaps one common word for the short form people actually type — "vous" becomes "vs".</p>
+          <div class="rule-example"><p class="ex-before" data-before></p><p class="ex-after" data-after></p></div>
+          <button class="rule-shuffle" data-shuffle="r01" type="button">↻ Shuffle example</button>
+        </article>
+
+        <article class="rule-card" data-rule="r02">
+          <span class="rule-index">02</span>
+          <h3 class="rule-name">Accent drop <span class="rule-code">R-02</span></h3>
+          <p class="rule-desc">Drops one accent from the message — the kind of slip a fast typist barely notices.</p>
+          <div class="rule-example"><p class="ex-before" data-before></p><p class="ex-after" data-after></p></div>
+          <button class="rule-shuffle" data-shuffle="r02" type="button">↻ Shuffle example</button>
+        </article>
+
+        <article class="rule-card" data-rule="r03">
+          <span class="rule-index">03</span>
+          <h3 class="rule-name">Letter omission <span class="rule-code">R-03</span></h3>
+          <p class="rule-desc">Removes one interior letter from a longer word. Mutually exclusive with fusion, below.</p>
+          <div class="rule-example"><p class="ex-before" data-before></p><p class="ex-after" data-after></p></div>
+          <button class="rule-shuffle" data-shuffle="r03" type="button">↻ Shuffle example</button>
+        </article>
+
+        <article class="rule-card" data-rule="r04">
+          <span class="rule-index">04</span>
+          <h3 class="rule-name">Word fusion <span class="rule-code">R-04</span></h3>
+          <p class="rule-desc">Merges two adjacent words into one, the way a message sent in a hurry often reads.</p>
+          <div class="rule-example"><p class="ex-before" data-before></p><p class="ex-after" data-after></p></div>
+          <button class="rule-shuffle" data-shuffle="r04" type="button">↻ Shuffle example</button>
+        </article>
+
+        <article class="rule-card" data-rule="r05">
+          <span class="rule-index">05</span>
+          <h3 class="rule-name">Punctuation <span class="rule-code">R-05</span></h3>
+          <p class="rule-desc">Drops one comma, semicolon, colon or exclamation mark. A question mark is never touched.</p>
+          <div class="rule-example"><p class="ex-before" data-before></p><p class="ex-after" data-after></p></div>
+          <button class="rule-shuffle" data-shuffle="r05" type="button">↻ Shuffle example</button>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STUDIO ============ -->
+  <section class="studio" id="studio">
+    <div class="wrap">
+      <div class="section-head reveal">
+        <h2 class="display-lg">The studio</h2>
+        <p class="section-sub">Configure the rule engine, paste a message, watch it transform. The cleaning row below is a lightweight simulation for this demo — the humanized output is the real algorithm, running in your browser, on a seed you can reproduce.</p>
+      </div>
+
+      <div class="studio-shell">
+        <aside class="studio-sidebar">
+          <div class="side-block">
+            <label class="side-label" for="modelSelect">Model (cleaning)</label>
+            <select id="modelSelect" class="select">
+              <option>openai/gpt-4o-mini</option>
+              <option>anthropic/claude-3-5-haiku</option>
+              <option>mistralai/mistral-small-3.1-24b</option>
+              <option>google/gemini-2.0-flash-001</option>
+              <option>meta-llama/llama-3.1-8b-instruct</option>
+            </select>
+          </div>
+
+          <div class="side-block">
+            <p class="side-label">Humanizer rules</p>
+            <div class="rule-row" data-row="r01">
+              <div class="rule-row-top">
+                <span class="rule-row-name"><span class="switch"><input type="checkbox" checked data-toggle="r01"><span class="switch-track"></span></span> Abbreviation <span class="rule-code">R-01</span></span>
+                <span class="rule-row-pct" data-pct="r01">50%</span>
+              </div>
+              <input type="range" min="0" max="100" value="50" data-slider="r01">
+            </div>
+            <div class="rule-row" data-row="r02">
+              <div class="rule-row-top">
+                <span class="rule-row-name"><span class="switch"><input type="checkbox" checked data-toggle="r02"><span class="switch-track"></span></span> Accent drop <span class="rule-code">R-02</span></span>
+                <span class="rule-row-pct" data-pct="r02">50%</span>
+              </div>
+              <input type="range" min="0" max="100" value="50" data-slider="r02">
+            </div>
+            <div class="rule-row" data-row="r03">
+              <div class="rule-row-top">
+                <span class="rule-row-name"><span class="switch"><input type="checkbox" checked data-toggle="r03"><span class="switch-track"></span></span> Letter omission <span class="rule-code">R-03</span></span>
+                <span class="rule-row-pct" data-pct="r03">50%</span>
+              </div>
+              <input type="range" min="0" max="100" value="50" data-slider="r03">
+            </div>
+            <div class="rule-row" data-row="r04">
+              <div class="rule-row-top">
+                <span class="rule-row-name"><span class="switch"><input type="checkbox" checked data-toggle="r04"><span class="switch-track"></span></span> Word fusion <span class="rule-code">R-04</span></span>
+                <span class="rule-row-pct" data-pct="r04">50%</span>
+              </div>
+              <input type="range" min="0" max="100" value="50" data-slider="r04">
+            </div>
+            <div class="rule-row" data-row="r05">
+              <div class="rule-row-top">
+                <span class="rule-row-name"><span class="switch"><input type="checkbox" checked data-toggle="r05"><span class="switch-track"></span></span> Punctuation <span class="rule-code">R-05</span></span>
+                <span class="rule-row-pct" data-pct="r05">50%</span>
+              </div>
+              <input type="range" min="0" max="100" value="50" data-slider="r05">
+            </div>
+            <div class="rule-row" id="weightRow">
+              <div class="rule-row-top">
+                <span class="rule-row-name">R-03 vs R-04 weight</span>
+                <span class="rule-row-pct" id="weightPct">50 / 50</span>
+              </div>
+              <input type="range" min="0" max="100" value="50" id="weightSlider">
+            </div>
+          </div>
+
+          <div class="side-block">
+            <label class="side-label" for="seedInput">Seed (optional)</label>
+            <input type="number" id="seedInput" class="input" placeholder="Random per message">
+          </div>
+        </aside>
+
+        <div class="studio-main">
+          <div class="studio-tabs" role="tablist">
+            <button class="tab-btn active" data-tab="single" role="tab" aria-selected="true">Single message</button>
+            <button class="tab-btn" data-tab="batch" role="tab" aria-selected="false">Batch (CSV)</button>
+          </div>
+
+          <div class="tab-panel active" data-panel="single">
+            <div class="chat-toolbar">
+              <button class="btn btn-ghost btn-sm" id="clearConvo" type="button">Clear conversation</button>
+              <button class="btn btn-ghost btn-sm" id="exportConvo" type="button">Export (JSON)</button>
+            </div>
+            <div class="chat-log" id="chatLog">
+              <p class="chat-empty" id="chatEmpty">Paste a message below to see it processed.</p>
+            </div>
+            <form class="chat-form" id="chatForm">
+              <textarea id="chatInput" rows="2" placeholder="Paste the raw input here…" required></textarea>
+              <button class="btn btn-primary" type="submit">Run pipeline</button>
+            </form>
+          </div>
+
+          <div class="tab-panel" data-panel="batch">
+            <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload a CSV file">
+              <input type="file" id="fileInput" accept=".csv" hidden>
+              <p class="dz-title">Drop a CSV, or click to browse</p>
+              <p class="dz-sub">Looks for a column named "Input brut", "input", or "raw".</p>
+              <button class="btn btn-ghost btn-sm" id="sampleBtn" type="button">Or load sample data</button>
+            </div>
+            <p class="batch-status" id="batchStatus"></p>
+            <div class="batch-progress" id="batchProgress" hidden><div class="batch-progress-bar" id="batchProgressBar"></div></div>
+            <div class="batch-results" id="batchResults" hidden>
+              <div class="batch-results-head">
+                <span id="batchSummary"></span>
+                <button class="btn btn-ghost btn-sm" id="exportCsv" type="button">Export results (CSV)</button>
+              </div>
+              <div class="table-wrap"><table class="batch-table" id="batchTable"></table></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <a class="brand" href="#top">
+      <span class="brand-mark"><svg viewBox="0 0 32 32" width="18" height="18" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="1.4"/><path d="M10 19L16 12L22 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="brand-word">Breeve</span>
+    </a>
+    <p class="footer-tag">Text that doesn't sound cleaned.</p>
+    <nav class="footer-links">
+      <a href="#pipeline">Pipeline</a>
+      <a href="#rules">Rules</a>
+      <a href="#studio">Studio</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(function(){
+"use strict";
+
+/* ============================================================
+   HUMANIZER ENGINE — a faithful JS port of the rule engine
+   ============================================================ */
+const DEFAULT_ABBREVIATIONS = {
+  "quelque chose":"qqch", "maintenant":"mtn", "beaucoup":"bcp", "pour":"pr", "vous":"vs"
+};
+const ACCENT_BASE = {"à":"a","â":"a","ä":"a","é":"e","è":"e","ê":"e","ë":"e","î":"i","ï":"i","ô":"o","ö":"o","ù":"u","û":"u","ü":"u","ç":"c","ÿ":"y"};
+const ACCENT_MAP = (function(){
+  const map = Object.assign({}, ACCENT_BASE);
+  Object.keys(ACCENT_BASE).forEach(function(k){ map[k.toUpperCase()] = ACCENT_BASE[k].toUpperCase(); });
+  return map;
+})();
+const REMOVABLE_PUNCT = [',',';',':','!'];
+
+function hashSeed(str){
+  let h = 0x811c9dc5;
+  for(let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function makeRng(message, seedOverride){
+  const seed = (seedOverride !== null && seedOverride !== undefined && !Number.isNaN(seedOverride))
+    ? (seedOverride >>> 0) : hashSeed(message);
+  return { next: mulberry32(seed), seed: seed };
+}
+function choice(rng, arr){ return arr[Math.min(arr.length-1, Math.floor(rng.next()*arr.length))]; }
+function weightedChoice(rng, items, weights){
+  const total = weights.reduce(function(a,b){return a+b;},0) || 1;
+  let r = rng.next()*total, acc=0;
+  for(let i=0;i<items.length;i++){ acc+=weights[i]; if(r<=acc) return items[i]; }
+  return items[items.length-1];
+}
+
+function ruleR01(text, rng, cfg){
+  if(!cfg.enable.r01 || rng.next() > cfg.prob.r01) return {text:text, fired:false};
+  const keys = Object.keys(cfg.abbreviations).sort(function(a,b){return b.length-a.length;});
+  let candidates = [];
+  keys.forEach(function(key){
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const re = new RegExp("(?<![\\p{L}\\p{N}_])" + escaped + "(?![\\p{L}\\p{N}_])", "giu");
+    let m;
+    while((m = re.exec(text))){
+      candidates.push({start:m.index, end:m.index+m[0].length, key:key});
+      if(m[0].length===0) re.lastIndex++;
+    }
+  });
+  if(candidates.length===0) return {text:text, fired:false};
+  const pick = choice(rng, candidates);
+  let replacement = cfg.abbreviations[pick.key];
+  const original = text.slice(pick.start, pick.end);
+  if(original[0] === original[0].toUpperCase() && /\p{L}/u.test(original[0])){
+    replacement = replacement.charAt(0).toUpperCase() + replacement.slice(1);
+  }
+  return {text: text.slice(0,pick.start) + replacement + text.slice(pick.end), fired:true};
+}
+function ruleR02(text, rng, cfg){
+  if(!cfg.enable.r02 || rng.next() > cfg.prob.r02) return {text:text, fired:false};
+  const positions = [];
+  for(let i=0;i<text.length;i++){ if(ACCENT_MAP[text[i]]) positions.push(i); }
+  if(positions.length===0) return {text:text, fired:false};
+  const idx = choice(rng, positions);
+  return {text: text.slice(0,idx) + ACCENT_MAP[text[idx]] + text.slice(idx+1), fired:true};
+}
+function r03Candidates(text){
+  const re = /(?<![\p{L}\p{N}_])[\p{L}]{5,}(?![\p{L}\p{N}_])/gu;
+  let m; const out = [];
+  while((m = re.exec(text)) !== null){ out.push({start:m.index, end:m.index+m[0].length}); }
+  return out;
+}
+function applyR03(text, rng){
+  const candidates = r03Candidates(text);
+  const m = choice(rng, candidates);
+  const word = text.slice(m.start, m.end);
+  const posInWord = 1 + Math.floor(rng.next() * (word.length - 2));
+  const newWord = word.slice(0,posInWord) + word.slice(posInWord+1);
+  return text.slice(0,m.start) + newWord + text.slice(m.end);
+}
+function r04Candidates(text){
+  const re = /(?<=[\p{L}\p{N}])( )(?=[\p{L}\p{N}])/gu;
+  let m; const out = [];
+  while((m = re.exec(text)) !== null){ out.push({start:m.index, end:m.index+1}); }
+  return out;
+}
+function applyR04(text, rng){
+  const candidates = r04Candidates(text);
+  const m = choice(rng, candidates);
+  return text.slice(0,m.start) + text.slice(m.end);
+}
+function ruleR03R04(text, rng, cfg){
+  const r03avail = cfg.enable.r03 && r03Candidates(text).length>0;
+  const r04avail = cfg.enable.r04 && r04Candidates(text).length>0;
+  if(!r03avail && !r04avail) return {text:text, fired:null};
+  let choiceRule;
+  if(r03avail && r04avail) choiceRule = weightedChoice(rng, ['R-03','R-04'], [cfg.weight.r03, cfg.weight.r04]);
+  else choiceRule = r03avail ? 'R-03' : 'R-04';
+  if(choiceRule === 'R-03'){
+    if(rng.next() > cfg.prob.r03) return {text:text, fired:null};
+    return {text: applyR03(text, rng), fired:'R-03'};
+  } else {
+    if(rng.next() > cfg.prob.r04) return {text:text, fired:null};
+    return {text: applyR04(text, rng), fired:'R-04'};
+  }
+}
+function ruleR05(text, rng, cfg){
+  if(!cfg.enable.r05 || rng.next() > cfg.prob.r05) return {text:text, fired:false};
+  const positions = [];
+  for(let i=0;i<text.length;i++){ if(REMOVABLE_PUNCT.indexOf(text[i]) !== -1) positions.push(i); }
+  if(positions.length===0) return {text:text, fired:false};
+  const idx = choice(rng, positions);
+  return {text: text.slice(0,idx) + text.slice(idx+1), fired:true};
+}
+function humanize(message, cfg){
+  if(!message) return {text:message, applied:[], seed:0};
+  const rng = makeRng(message, cfg.seed);
+  let text = message;
+  const applied = [];
+  let r;
+  r = ruleR01(text, rng, cfg); text = r.text; if(r.fired) applied.push('R-01');
+  r = ruleR02(text, rng, cfg); text = r.text; if(r.fired) applied.push('R-02');
+  r = ruleR03R04(text, rng, cfg); text = r.text; if(r.fired) applied.push(r.fired);
+  r = ruleR05(text, rng, cfg); text = r.text; if(r.fired) applied.push('R-05');
+  return {text:text, applied:applied, seed: rng.seed};
+}
+
+function defaultCfg(overrides){
+  const base = {
+    enable:{r01:true,r02:true,r03:true,r04:true,r05:true},
+    prob:{r01:0.5,r02:0.5,r03:0.5,r04:0.5,r05:0.5},
+    weight:{r03:0.5,r04:0.5},
+    abbreviations: DEFAULT_ABBREVIATIONS,
+    seed: null
+  };
+  return Object.assign({}, base, overrides || {});
+}
+
+/* ---------- character diff (LCS) for the "track changes" view ---------- */
+function diffChars(a, b){
+  const n=a.length, m=b.length;
+  const dp = new Array(n+1);
+  for(let i=0;i<=n;i++) dp[i] = new Uint16Array(m+1);
+  for(let i=n-1;i>=0;i--){
+    for(let j=m-1;j>=0;j--){
+      dp[i][j] = (a[i]===b[j]) ? dp[i+1][j+1]+1 : Math.max(dp[i+1][j], dp[i][j+1]);
+    }
+  }
+  let i=0,j=0; const ops=[];
+  while(i<n && j<m){
+    if(a[i]===b[j]){ ops.push(['eq',a[i]]); i++; j++; }
+    else if(dp[i+1][j] >= dp[i][j+1]){ ops.push(['del',a[i]]); i++; }
+    else { ops.push(['ins',b[j]]); j++; }
+  }
+  while(i<n){ ops.push(['del',a[i]]); i++; }
+  while(j<m){ ops.push(['ins',b[j]]); j++; }
+  // merge consecutive same-type ops
+  const merged = [];
+  ops.forEach(function(op){
+    const last = merged[merged.length-1];
+    if(last && last[0]===op[0]) last[1]+=op[1]; else merged.push([op[0], op[1]]);
+  });
+  return merged;
+}
+function escapeHtml(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function renderDiff(before, after){
+  const ops = diffChars(before, after);
+  return ops.map(function(op){
+    const txt = escapeHtml(op[1]);
+    if(op[0]==='eq') return txt;
+    if(op[0]==='del') return '<del>'+txt+'</del>';
+    return '<ins>'+txt+'</ins>';
+  }).join('');
+}
+
+/* ============================================================
+   NAV
+   ============================================================ */
+const nav = document.getElementById('siteNav');
+window.addEventListener('scroll', function(){
+  nav.classList.toggle('is-scrolled', window.scrollY > 8);
+}, {passive:true});
+
+const navToggle = document.getElementById('navToggle');
+const navLinks = document.getElementById('navLinks');
+navToggle.addEventListener('click', function(){
+  const open = navLinks.classList.toggle('is-open');
+  navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+});
+navLinks.querySelectorAll('a').forEach(function(a){
+  a.addEventListener('click', function(){ navLinks.classList.remove('is-open'); });
+});
+
+/* ============================================================
+   THEME TOGGLE — light (white) / dark (ink), in-memory only
+   ============================================================ */
+const root = document.documentElement;
+const themeToggle = document.getElementById('themeToggle');
+function setTheme(theme){
+  root.setAttribute('data-theme', theme);
+  const isDark = theme === 'dark';
+  themeToggle.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+  themeToggle.setAttribute('aria-label', isDark ? 'Switch to white background' : 'Switch to dark background');
+}
+themeToggle.addEventListener('click', function(){
+  setTheme(root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+});
+setTheme('light');
+
+/* ============================================================
+   SCROLL REVEAL (section-level only, respects reduced motion)
+   ============================================================ */
+if('IntersectionObserver' in window){
+  const io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('is-visible'); io.unobserve(e.target); } });
+  }, {threshold:0.2});
+  document.querySelectorAll('.reveal').forEach(function(el){ io.observe(el); });
+} else {
+  document.querySelectorAll('.reveal').forEach(function(el){ el.classList.add('is-visible'); });
+}
+
+/* ============================================================
+   HERO DEMO
+   ============================================================ */
+const heroInput = document.getElementById('heroInput');
+const heroRun = document.getElementById('heroRun');
+const heroDiff = document.getElementById('heroDiff');
+const heroChips = document.getElementById('heroChips');
+
+function runHeroDemo(){
+  const raw = heroInput.value.trim();
+  if(!raw) return;
+  const cfg = defaultCfg();
+  const res = humanize(raw, cfg);
+  heroDiff.innerHTML = renderDiff(raw, res.text);
+  const allRules = ['R-01','R-02','R-03','R-04','R-05'];
+  heroChips.innerHTML = allRules.map(function(r){
+    const on = res.applied.indexOf(r) !== -1;
+    return '<span class="chip'+(on?' chip--on':'')+'">'+r+(on?' fired':'')+'</span>';
+  }).join('') + '<span class="chip chip--seed">seed '+res.seed+'</span>';
+}
+heroRun.addEventListener('click', runHeroDemo);
+window.addEventListener('load', runHeroDemo);
+
+/* ============================================================
+   RULE CARDS — isolated live examples
+   ============================================================ */
+const ruleExamples = {
+  r01: "Merci pour votre question, je vais vous répondre.",
+  r02: "Je perçois beaucoup d'énergie autour de vous.",
+  r03: "Je perçois quelque chose d'important pour votre avenir.",
+  r04: "Voulez-vous que je continue maintenant ?",
+  r05: "Bonjour, je vois beaucoup d'énergie autour de vous en ce moment !"
+};
+function isolatedCfg(rule, seed){
+  const enable = {r01:false,r02:false,r03:false,r04:false,r05:false};
+  const prob = {r01:0,r02:0,r03:0,r04:0,r05:0};
+  const weight = {r03: rule==='r03' ? 1 : 0, r04: rule==='r04' ? 1 : 0};
+  enable[rule] = true; prob[rule] = 1;
+  return defaultCfg({enable:enable, prob:prob, weight:weight, seed:seed});
+}
+function refreshRuleCard(rule, seed){
+  const card = document.querySelector('.rule-card[data-rule="'+rule+'"]');
+  if(!card) return;
+  const before = ruleExamples[rule];
+  const cfg = isolatedCfg(rule, seed);
+  const res = humanize(before, cfg);
+  card.querySelector('[data-before]').textContent = before;
+  card.querySelector('[data-after]').innerHTML = renderDiff(before, res.text);
+}
+Object.keys(ruleExamples).forEach(function(rule){ refreshRuleCard(rule, 7); });
+document.querySelectorAll('.rule-shuffle').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    refreshRuleCard(btn.getAttribute('data-shuffle'), Date.now() % 100000);
+  });
+});
+
+/* ============================================================
+   STUDIO — sidebar config
+   ============================================================ */
+const studioCfg = defaultCfg();
+
+document.querySelectorAll('[data-toggle]').forEach(function(input){
+  input.addEventListener('change', function(){
+    studioCfg.enable[input.getAttribute('data-toggle')] = input.checked;
+  });
+});
+document.querySelectorAll('[data-slider]').forEach(function(slider){
+  const key = slider.getAttribute('data-slider');
+  slider.addEventListener('input', function(){
+    studioCfg.prob[key] = Number(slider.value)/100;
+    document.querySelector('[data-pct="'+key+'"]').textContent = slider.value + '%';
+  });
+});
+const weightSlider = document.getElementById('weightSlider');
+const weightPct = document.getElementById('weightPct');
+weightSlider.addEventListener('input', function(){
+  const v = Number(weightSlider.value);
+  studioCfg.weight.r03 = v/100;
+  studioCfg.weight.r04 = (100-v)/100;
+  weightPct.textContent = v + ' / ' + (100-v);
+});
+const seedInput = document.getElementById('seedInput');
+seedInput.addEventListener('input', function(){
+  studioCfg.seed = seedInput.value === '' ? null : Number(seedInput.value);
+});
+
+/* ============================================================
+   STUDIO — tabs
+   ============================================================ */
+document.querySelectorAll('.tab-btn').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
+    document.querySelectorAll('.tab-panel').forEach(function(p){ p.classList.remove('active'); });
+    btn.classList.add('active'); btn.setAttribute('aria-selected','true');
+    document.querySelector('.tab-panel[data-panel="'+btn.getAttribute('data-tab')+'"]').classList.add('active');
+  });
+});
+
+/* ============================================================
+   STUDIO — single message pipeline (simulated cleaning + real humanizer)
+   ============================================================ */
+function simulateCleaning(raw){
+  const message = raw.trim().replace(/\s+/g, ' ');
+  const chips = [];
+  if(/[!?]{2,}|[A-ZÀ-Ý]{4,}/.test(raw)) chips.push('tone: energetic');
+  else if(/\?/.test(raw)) chips.push('tone: inquisitive');
+  else chips.push('tone: warm');
+  if(/\?/.test(raw)) chips.push('intent: awaiting reply');
+  else if(/continue/i.test(raw)) chips.push('intent: continue thread');
+  else chips.push('intent: inform');
+  return {message: message, chips: chips};
+}
+
+const conversation = [];
+const chatLog = document.getElementById('chatLog');
+const chatEmpty = document.getElementById('chatEmpty');
+const chatForm = document.getElementById('chatForm');
+const chatInput = document.getElementById('chatInput');
+
+function jsonPreview(obj){
+  const lines = Object.keys(obj).map(function(k){
+    return '  <span class="jk">"'+k+'"</span>: <span class="jv">"'+escapeHtml(String(obj[k]))+'"</span>';
+  });
+  return '{\n' + lines.join(',\n') + '\n}';
+}
+
+function renderExchange(raw, result){
+  const wrap = document.createElement('div');
+
+  const bubble = document.createElement('div');
+  bubble.className = 'user-bubble';
+  bubble.textContent = raw;
+  wrap.appendChild(bubble);
+
+  const card = document.createElement('div');
+  card.className = 'result-card';
+  card.style.marginTop = '0.6rem';
+  card.innerHTML =
+    '<div class="field-title">message (cleaning)</div>' +
+    '<div class="field-value">'+escapeHtml(result.message)+'</div>' +
+    '<div class="field-title">metadata</div>' +
+    '<div class="meta-chips">'+result.chips.map(function(c){return '<span class="chip">'+escapeHtml(c)+'</span>';}).join('')+'</div>' +
+    '<div class="field-title">humanized_message</div>' +
+    '<div class="field-value">'+renderDiff(result.message, result.humanized)+'</div>' +
+    '<div class="result-foot">' +
+      result.applied.map(function(r){ return '<span class="chip chip--on">'+r+'</span>'; }).join('') +
+      (result.applied.length===0 ? '<span class="chip">no rule fired</span>' : '') +
+      '<span class="chip chip--seed">seed '+result.seed+'</span>' +
+    '</div>' +
+    '<div class="json-block">'+jsonPreview({message:result.message, metadata:result.chips.join(', '), humanized_message:result.humanized})+'</div>';
+  wrap.appendChild(card);
+
+  chatLog.appendChild(wrap);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+chatForm.addEventListener('submit', function(e){
+  e.preventDefault();
+  const raw = chatInput.value.trim();
+  if(!raw) return;
+  chatEmpty.style.display = 'none';
+  const cleaned = simulateCleaning(raw);
+  const res = humanize(cleaned.message, studioCfg);
+  const result = {message: cleaned.message, chips: cleaned.chips, humanized: res.text, applied: res.applied, seed: res.seed};
+  conversation.push({raw:raw, result:result});
+  renderExchange(raw, result);
+  chatInput.value = '';
+});
+
+document.getElementById('clearConvo').addEventListener('click', function(){
+  conversation.length = 0;
+  chatLog.innerHTML = '';
+  chatLog.appendChild(chatEmpty);
+  chatEmpty.style.display = 'block';
+});
+
+document.getElementById('exportConvo').addEventListener('click', function(){
+  if(conversation.length===0) return;
+  const blob = new Blob([JSON.stringify(conversation, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'breeve-conversation.json'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+/* ============================================================
+   STUDIO — batch (CSV)
+   ============================================================ */
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const batchStatus = document.getElementById('batchStatus');
+const batchProgress = document.getElementById('batchProgress');
+const batchProgressBar = document.getElementById('batchProgressBar');
+const batchResults = document.getElementById('batchResults');
+const batchSummary = document.getElementById('batchSummary');
+const batchTable = document.getElementById('batchTable');
+
+const INPUT_COLUMN_CANDIDATES = ["input brut","input_brut","input","raw","raw input","message brut"];
+function normalizeColName(name){
+  return String(name).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+}
+function parseCsv(text){
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i++; } else inQuotes = false;
+      } else field += c;
+    } else {
+      if(c === '"') inQuotes = true;
+      else if(c === ','){ row.push(field); field=''; }
+      else if(c === '\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+      else if(c === '\r'){ /* skip */ }
+      else field += c;
+    }
+  }
+  if(field.length || row.length){ row.push(field); rows.push(row); }
+  return rows.filter(function(r){ return r.length>1 || (r[0] && r[0].trim()!==''); });
+}
+
+let batchRows = [];
+let batchResultRows = [];
+
+function handleCsvText(text){
+  const rows = parseCsv(text);
+  if(rows.length < 2){
+    batchStatus.textContent = 'Could not find any data rows in that file.';
+    return;
+  }
+  const header = rows[0];
+  const normMap = {};
+  header.forEach(function(h, idx){ normMap[normalizeColName(h)] = idx; });
+  let colIdx = -1;
+  for(const cand of INPUT_COLUMN_CANDIDATES){ if(cand in normMap){ colIdx = normMap[cand]; break; } }
+  if(colIdx === -1){
+    batchStatus.textContent = 'No "Input brut" column found. Columns available: ' + header.join(', ');
+    batchResults.hidden = true;
+    return;
+  }
+  batchRows = rows.slice(1).map(function(r){ return (r[colIdx] || '').toString(); }).filter(function(s){ return s.trim() !== ''; });
+  batchStatus.innerHTML = batchRows.length + ' rows detected using column "' + escapeHtml(header[colIdx]) + '". <button class="btn btn-primary btn-sm" id="runBatchBtn" type="button" style="margin-left:0.6rem;">Run batch</button>';
+  document.getElementById('runBatchBtn').addEventListener('click', runBatch);
+}
+
+function runBatch(){
+  batchResults.hidden = true;
+  batchProgress.hidden = false;
+  batchProgressBar.style.width = '0%';
+  batchResultRows = [];
+  let i = 0;
+  const total = batchRows.length;
+  function step(){
+    const raw = batchRows[i];
+    const cleaned = simulateCleaning(raw);
+    const res = humanize(cleaned.message, studioCfg);
+    batchResultRows.push({raw:raw, message:cleaned.message, humanized:res.text, applied:res.applied.join(' + ') || '—', seed:res.seed});
+    i++;
+    batchProgressBar.style.width = Math.round((i/total)*100) + '%';
+    if(i < total){
+      setTimeout(step, total > 60 ? 4 : 35);
+    } else {
+      finishBatch();
+    }
+  }
+  step();
+}
+
+function finishBatch(){
+  batchProgress.hidden = true;
+  batchResults.hidden = false;
+  const fired = batchResultRows.filter(function(r){ return r.applied !== '—'; }).length;
+  batchSummary.textContent = batchResultRows.length + ' rows processed · ' + fired + ' had at least one rule fire.';
+  const shown = batchResultRows.slice(0, 60);
+  batchTable.innerHTML =
+    '<thead><tr><th>Input</th><th>Humanized</th><th>Rules</th></tr></thead><tbody>' +
+    shown.map(function(r){
+      return '<tr><td>'+escapeHtml(r.raw)+'</td><td class="mono-strong">'+escapeHtml(r.humanized)+'</td><td>'+escapeHtml(r.applied)+'</td></tr>';
+    }).join('') + '</tbody>';
+  if(batchResultRows.length > shown.length){
+    batchSummary.textContent += ' Showing first ' + shown.length + ' below; export for the rest.';
+  }
+}
+
+document.getElementById('exportCsv').addEventListener('click', function(){
+  if(batchResultRows.length===0) return;
+  const header = ['input_raw','message','humanized_message','applied_rules','seed'];
+  const lines = [header.join(',')];
+  batchResultRows.forEach(function(r){
+    const vals = [r.raw, r.message, r.humanized, r.applied, r.seed].map(function(v){
+      const s = String(v).replace(/"/g,'""');
+      return '"'+s+'"';
+    });
+    lines.push(vals.join(','));
+  });
+  const blob = new Blob([lines.join('\n')], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'breeve-batch-results.csv'; a.click();
+  URL.revokeObjectURL(url);
+});
+
+dropzone.addEventListener('click', function(){ fileInput.click(); });
+dropzone.addEventListener('keydown', function(e){ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); fileInput.click(); } });
+['dragover','dragenter'].forEach(function(evt){
+  dropzone.addEventListener(evt, function(e){ e.preventDefault(); dropzone.classList.add('is-drag'); });
+});
+['dragleave','drop'].forEach(function(evt){
+  dropzone.addEventListener(evt, function(e){ e.preventDefault(); dropzone.classList.remove('is-drag'); });
+});
+dropzone.addEventListener('drop', function(e){
+  const file = e.dataTransfer.files[0];
+  if(file) readFile(file);
+});
+fileInput.addEventListener('change', function(){
+  if(fileInput.files[0]) readFile(fileInput.files[0]);
+});
+function readFile(file){
+  const reader = new FileReader();
+  reader.onload = function(){ handleCsvText(String(reader.result)); };
+  reader.readAsText(file);
+}
+
+document.getElementById('sampleBtn').addEventListener('click', function(){
+  const sample = [
+    'Input brut',
+    'Bonjour, je vois beaucoup d\u2019\u00e9nergie positive autour de vous en ce moment !',
+    'Maintenant je per\u00e7ois quelque chose d\u2019important pour votre avenir professionnel.',
+    'Merci pour votre question ; la r\u00e9ponse est claire, pr\u00e9cise et rassurante.',
+    'Voulez-vous que je continue cette lecture ensemble ?',
+    'Je remarque beaucoup de changements pour vous ce mois-ci.'
+  ].join('\n');
+  handleCsvText(sample);
+});
+
+})();
+</script>
+</body>
+</html>
