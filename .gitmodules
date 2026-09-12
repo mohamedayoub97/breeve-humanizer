@@ -1,1 +1,5 @@
- 
+ git clone https://github.com/mohamedayoub97/breeve-humanizer.git
+cd breeve-humanizer
+git rm --cached breeve-humanizer
+git commit -m "Remove breeve-humanizer submodule entry"
+git push
